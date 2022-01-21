@@ -6,7 +6,7 @@ vec3 bgcolor2 = vec3(0.0,0.0,0.0);
 
 
 float random (vec2 st) {
-    return fract(cos(dot(st.xy, vec2(100000,788.233)))*4832333.*time);
+    return fract(cos(dot(st.xy, vec2(100000,70088.233)))*200000003.*time);
 }
 
 
@@ -50,13 +50,14 @@ void main() {
     }
     
       for( float i = 0.; i < 1.; i++ ) { 
-        p.y += sin( p.x ) * .2; 
+        p.y += sin( p.x ) * (2.); 
         linescolor += abs( thickness*0.1 / p.y );
     }
 
     
-    gl_FragColor = vec4(bgcolor+(sin(time/5.)/5.+0.1),1.) + 
+    gl_FragColor = vec4(bgcolor+(sin(time/5.)/5.+0.2),1.) + 
         vec4(color2*0.1,color2*0.1 + color2*0.1,color2*0.1, 0.1) + 
         vec4(color1*0.2,color1*0.1 + color1*0.05,color1*0.1, 0.1) + 
-        vec4(vec3(stars), 1.0) + vec4(linescolor);
+        vec4(vec3(stars), 1.0) + 
+        vec4(linescolor);
 }
