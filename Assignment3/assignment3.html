@@ -131,6 +131,20 @@
       setInitialState()
     }
 
+    const pingpong = function() {
+      gl.bindFramebuffer( gl.FRAMEBUFFER, framebuffer1 ) 
+      gl.framebufferTexture2D( gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureFront, 0 ) 
+
+      gl.bindTexture( gl.TEXTURE_2D, textureBack )
+      gl.drawArrays( gl.TRIANGLES, 0, 6 ) 
+
+      gl.bindFramebuffer( gl.FRAMEBUFFER, framebuffer2 )
+      gl.framebufferTexture2D( gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureBack, 0 )
+    
+      gl.bindTexture( gl.TEXTURE_2D, textureFront ) 
+      gl.drawArrays( gl.TRIANGLES, 0, 6 ) 
+    }
+
     function poke( x, y, valueA, valueB, texture ) {   
     gl.bindTexture( gl.TEXTURE_2D, texture )
     
@@ -279,6 +293,8 @@
 
       // Create a framebuffer and attach the texture.
       framebuffer = gl.createFramebuffer()
+      framebuffer1 = gl.createFramebuffer()
+      framebuffer2 = gl.createFramebuffer()
       
       // textures loaded, now ready to render
       render()
@@ -317,6 +333,10 @@
       gl.uniform1f( uDiffusionA, widget.diffusionA ) 
       gl.uniform1f( uDiffusionB, widget.diffusionB ) 
 
+      // multipass render the simulation
+      for( let i = 0; i < 4; i++ ) pingpong()
+
+      /*
       gl.bindFramebuffer( gl.FRAMEBUFFER, framebuffer )
       // use the framebuffer to write to our texFront texture
       gl.framebufferTexture2D( gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureFront, 0 )
@@ -334,7 +354,7 @@
       // swap our front and back textures
       let tmp = textureFront
       textureFront = textureBack
-      textureBack = tmp
+      textureBack = tmp*/
 
       // use the default framebuffer object by passing null
       gl.bindFramebuffer( gl.FRAMEBUFFER, null )
