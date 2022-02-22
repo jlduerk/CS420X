@@ -7,3 +7,5 @@
 [Mini-Assignment: Video Feedback](https://jlduerk.github.io/CS420X/VideoFeedbackMiniAssignment/feedback.html)
 
 [Assignment 3: Reaction Diffusion](https://github.com/jlduerk/CS420X/blob/main/Assignment3/Assignment3.md)
+
+[Assignment 3: Physarium](https://github.com/jlduerk/CS420X/blob/main/Assignment4/Assignment4.md)
