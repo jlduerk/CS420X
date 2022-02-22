@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang='en'>
+
+<head>
+    <style>
+        body {
+            margin: 0;
+            background: black;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id='gl'></canvas>
+</body>
+
+<script id='copyVertex' type='x-shader/x-vertex'>#version 300 es
+    in vec2 a_pos;
+
+    void main() {
+      gl_Position = vec4( a_pos, 0, 1 );
+    }
+  </script>
+
+<!-- using dat.gui -->
+<script type="text/javascript" src="dat.gui.js"></script>
+
+<!-- render to screen shader -->
+<script id='copyFragment' type='x-shader/x-fragment'>#version 300 es
+    #ifdef GL_ES
+    precision mediump float;
+    #endif
+
+    uniform sampler2D uSampler;
+    uniform vec2 resolution;
+
+    out vec4 color;
+    void main() {
+      vec2 pos = gl_FragCoord.xy / resolution;
+      vec4 tex = texture( uSampler, pos );
+      color = vec4( tex.rgb, 1. );
+    }
+  </script>
+
+<script id='simulationVertex' type='x-shader/x-vertex'>#version 300 es
+    #define PI_4 3.1415926538/4.
+    precision mediump float;
+    
+    // input from our feedback TRANSFORM_FEEDBACK
+    in vec4 a_pos;
+    
+    uniform vec2 resolution;
+    uniform float sensorVar;
+    uniform float pointSize;
+    uniform float sensorAngle;
+    uniform float rotateAngle;
+    uniform float time;
+    uniform float dirTime;
+    
+    // our chemical layer
+    uniform sampler2D uSampler;
+    
+    // the output of our feedback transform
+    // xy will store our position
+    // zw wiil store our heading / direction
+    out vec4 o_vpos;
+    
+    // this function accepts a direction (header) for a
+    // agent and a rotation in radians, returning the
+    // new, rotated direction
+    vec2 rotate(vec2 dir, float angle) {
+      float  s = sin( angle );
+      float  c = cos( angle );
+      mat2   m = mat2( c, -s, s, c );
+      return m * dir;
+    }
+    
+    // pos - position of agent
+    // dir - heading of agent
+    // angle - direction to sense, in radians
+    // distance - distance to sense
+    float readSensor( vec2 pos, vec2 dir, float angle, vec2 distance ) {
+      vec2 newangle  = rotate( dir, angle  );
+      vec2 offset = newangle * distance;
+      return texture( uSampler, pos + offset ).r;
+    } 
+    
+    void main() {
+      // get normalied height / width of a single pixel 
+      vec2 pixel = 1. / resolution;
+    
+      // how far ahead should sensing occur? this is fun to play with
+      vec2 sensorDistance = pixel * sensorVar;
+    
+      // normalize our {-1,1} vertex coordinates to {0,1} for texture lookups
+      vec2 pos = (1. + a_pos.xy) / 2.;
+    float left = 0.;
+    float right = 0.;
+      // read sensor informatino at different angles
+      if (dirTime >= 1.0) {
+        left     = readSensor( pos, a_pos.zw, -sensorAngle * abs(sin(time) *3. ), sensorDistance );
+        right    = readSensor( pos, a_pos.zw, sensorAngle * abs(sin(time)*3.),  sensorDistance );
+      } else {
+        left     = readSensor( pos, a_pos.zw, -sensorAngle, sensorDistance );
+        right    = readSensor( pos, a_pos.zw, sensorAngle,  sensorDistance );
+      }
+      float forward  = readSensor( pos, a_pos.zw, 0.,    sensorDistance );
+      
+      // initialize feedback transform output
+      o_vpos = a_pos;
+    
+      // if most chemical is found to left... 
+      if( left > forward && left > right ) {
+        // rotate left and store in .zw
+        if (dirTime >= 1.0) {
+            o_vpos.zw = rotate( o_vpos.zw, -sensorAngle * abs(sin(time)*3.) );
+        }
+        else {
+            o_vpos.zw = rotate( o_vpos.zw, -sensorAngle );
+        }
+        
+      }else if( right > left && right > forward ) { // chemical is to the right
+        if (dirTime >= 1.0) {
+            o_vpos.zw = rotate( o_vpos.zw, rotateAngle * abs(sin(time)*3.) );
+        } else {
+            o_vpos.zw = rotate( o_vpos.zw, rotateAngle );
+        }
+        
+      }else if ( right == left ) { // randomly pick a direction
+        float rand = fract(sin(a_pos.x)*100000.0);
+        if( rand > .5 ) {
+            if (dirTime >= 1.0) {
+                o_vpos.zw = rotate( o_vpos.zw, rotateAngle * abs(sin(time)*3.) );
+            } else {
+                o_vpos.zw = rotate( o_vpos.zw, rotateAngle );
+            }
+        }else{
+            if (dirTime >= 1.0) {
+                o_vpos.zw = rotate( o_vpos.zw, -rotateAngle * abs(sin(time)*3.) );
+            } else {
+                o_vpos.zw = rotate( o_vpos.zw, -rotateAngle );
+            }
+        }
+      } // else keep going the same direction, no change required
+      
+      
+      // move our agent in our new direction by one pixel
+      o_vpos.xy += o_vpos.zw * pixel;
+
+      if( o_vpos.x > 1. ) o_vpos.x -= 2.;
+      if( o_vpos.x < -1. ) o_vpos.x += 2.;
+      if( o_vpos.y > 1. ) o_vpos.y -= 2.;
+      if( o_vpos.y < -1. ) o_vpos.y += 2.;
+      
+      gl_PointSize = pointSize;
+    
+      // position is for fragment shader rendering, don't need to include heading
+      gl_Position = vec4( a_pos.x, a_pos.y, 0., 1. );
+    }
+  </script>
+
+<script id='simulationFragment' type='x-shader/x-fragment'>#version 300 es
+    precision mediump float;
+    uniform float chemicalDeposit;
+    uniform float time;
+    uniform float rainbow;
+    
+    out vec4 o_frag;
+
+    void main() {
+
+        if (rainbow >= 1.0) {
+            o_frag = vec4( 1. * chemicalDeposit , abs(sin(time /200.)) / 2., abs(sin(time /50.)), .1 );
+        }
+      else {
+        o_frag = vec4( 1. * chemicalDeposit , 0., 0. , .1);
+      }
+      
+    } 
+  </script>
+
+<script id='ddFragment' type='x-shader/x-fragment'>#version 300 es
+    #ifdef GL_ES
+    precision mediump float;
+    #endif  
+    
+    uniform sampler2D uSampler;
+    uniform vec2 resolution;
+    uniform float gaussian;
+    
+    float get(int x, int y) {
+      return texture( uSampler, ( gl_FragCoord.xy + vec2(x, y) ) / resolution ).r;
+    }
+    
+    out vec4 color;
+    void main() {
+        float sum = 0.;
+        if (gaussian >= 1.0) {
+            sum = get(0,0) * 0.25;
+            sum += get(-1,0)  *  .125;
+            sum += get(-1,-1) *  .0625;
+            sum += get(0,-1)  *  .125;
+            sum += get(1,-1)  *  .0625;       
+            sum += get(1,0)   *  .125;
+            sum += get(1,1)   *  .0625;
+            sum += get(0,1)   *  .125;
+            sum += get(-1,1)  *  .0625;
+        }
+        else {
+            sum = get(0,0) * -1.;
+            sum += get(-1,0)  *  .2;
+            sum += get(-1,-1) *  .05;
+            sum += get(0,-1)  *  .2;
+            sum += get(1,-1)  *  .05;       
+            sum += get(1,0)   *  .2;
+            sum += get(1,1)   *  .05;
+            sum += get(0,1)   *  .2;
+            sum += get(-1,1)  *  .05;
+        }
+    
+      vec2 pos = gl_FragCoord.xy / resolution;
+      vec4 tex = texture( uSampler, pos );
+      color = vec4( sum * .9 , 0. , 0. , .25 );
+    }
+    </script>
+
+<script type='text/javascript'>
+    // "global" variables
+    let gl, uTime, uRes, transformFeedback, uSensorVar, uChemicalDeposit, uGaussian, uPointSize, uSensorAngle, uDirTime, uRotateAngle,
+        buffer1, buffer2, simulationPosition, copyPosition, uRainbow,
+        textureBack, textureFront, framebuffer,
+        copyProgram, simulationProgram, quad,
+        dimensions = { width: null, height: null },
+        agentCount = 1000000
+
+    let widget = new function () {
+      this.preset1 = false;
+      this.preset2 = false;
+      this.preset3 = false;
+      this.preset4 = false;
+      this.sensorDistance = 9.;
+      this.sensorAngle = 3.1415926538/4;
+      this.rotateAngle = 3.1415926538/4;
+      this.pointSize = 1.;
+      this.chemicalDeposit = 1.;
+      this.gaussianBlur = false;
+      this.timeDirection = false;
+      this.rainbow = false;
+      
+    }
+
+    let gui = new dat.GUI();
+    gui.add(widget, 'preset1');
+    gui.add(widget, 'preset2');
+    gui.add(widget, 'preset3');
+    gui.add(widget, 'preset4');
+    gui.add(widget, 'sensorDistance', 1.0, 50.);
+    gui.add(widget, 'sensorAngle', 0., 3.1415926538*2.);
+    gui.add(widget, 'rotateAngle', 0., 3.1415926538*2.);
+    gui.add(widget, 'pointSize', 1., 20.);
+    gui.add(widget, 'chemicalDeposit', 0.1, 1.);
+    gui.add(widget, 'gaussianBlur');
+    gui.add(widget, 'timeDirection');
+    gui.add(widget, 'rainbow');
+
+    window.onload = function () {
+        const canvas = document.getElementById('gl')
+        gl = canvas.getContext('webgl2')
+        canvas.width = dimensions.width = window.innerWidth
+        canvas.height = dimensions.height = window.innerHeight
+
+        // define drawing area of canvas. bottom corner, width / height
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
+
+        makeCopyPhase()
+        makeSimulationPhase()
+        makeDecayDiffusePhase()
+        makeTextures()
+        render()
+    }
+
+
+    function makeCopyPhase() {
+        makeCopyShaders()
+        quad = makeCopyBuffer()
+        makeCopyUniforms()
+    }
+
+    function makeDecayDiffusePhase() {
+        makeDecayDiffuseShaders()
+        makeDecayDiffuseUniforms()
+    }
+
+    function makeDecayDiffuseShaders() {
+        let shaderScript = document.getElementById('copyVertex')
+        let shaderSource = shaderScript.text
+        let vertexShader = gl.createShader(gl.VERTEX_SHADER)
+        gl.shaderSource(vertexShader, shaderSource)
+        gl.compileShader(vertexShader)
+
+        // create fragment shader
+        shaderScript = document.getElementById('ddFragment')
+        shaderSource = shaderScript.text
+        const drawFragmentShader = gl.createShader(gl.FRAGMENT_SHADER)
+        gl.shaderSource(drawFragmentShader, shaderSource)
+        gl.compileShader(drawFragmentShader)
+        console.log(gl.getShaderInfoLog(drawFragmentShader))
+
+        // create shader program  
+        ddProgram = gl.createProgram()
+        gl.attachShader(ddProgram, vertexShader)
+        gl.attachShader(ddProgram, drawFragmentShader)
+
+        gl.linkProgram(ddProgram)
+        gl.useProgram(ddProgram)
+    }
+
+    function makeDecayDiffuseUniforms() {
+        uResDD = gl.getUniformLocation(ddProgram, 'resolution')
+        uGaussian = gl.getUniformLocation(ddProgram, 'gaussian')
+        gl.uniform2f(uResDD, dimensions.width, dimensions.height)
+
+        // get position attribute location in shader
+        ddPosition = gl.getAttribLocation(ddProgram, 'a_pos')
+        // enable the attribute
+        gl.enableVertexAttribArray(copyPosition)
+        // this will point to the vertices in the last bound array buffer.
+        // In this example, we only use one array buffer, where we're storing 
+        // our vertices. Each vertex will have to floats (one for x, one for y)
+        gl.vertexAttribPointer(copyPosition, 2, gl.FLOAT, false, 0, 0)
+    }
+
+    function makeCopyShaders() {
+        let shaderScript = document.getElementById('copyVertex')
+        let shaderSource = shaderScript.text
+        let vertexShader = gl.createShader(gl.VERTEX_SHADER)
+        gl.shaderSource(vertexShader, shaderSource)
+        gl.compileShader(vertexShader)
+
+        // create fragment shader
+        shaderScript = document.getElementById('copyFragment')
+        shaderSource = shaderScript.text
+        const drawFragmentShader = gl.createShader(gl.FRAGMENT_SHADER)
+        gl.shaderSource(drawFragmentShader, shaderSource)
+        gl.compileShader(drawFragmentShader)
+        console.log(gl.getShaderInfoLog(drawFragmentShader))
+
+        // create shader program  
+        copyProgram = gl.createProgram()
+        gl.attachShader(copyProgram, vertexShader)
+        gl.attachShader(copyProgram, drawFragmentShader)
+
+        gl.linkProgram(copyProgram)
+        gl.useProgram(copyProgram)
+    }
+
+    function makeCopyBuffer() {
+        // create a buffer object to store vertices
+        const buffer = gl.createBuffer()
+
+        // point buffer at graphic context's ARRAY_BUFFER
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+
+        const triangles = new Float32Array([
+            -1, -1,
+            1, -1,
+            -1, 1,
+            -1, 1,
+            1, -1,
+            1, 1
+        ])
+
+        // initialize memory for buffer and populate it. Give
+        // open gl hint contents will not change dynamically.
+        gl.bufferData(gl.ARRAY_BUFFER, triangles, gl.STATIC_DRAW)
+
+        return buffer
+    }
+
+    function makeCopyUniforms() {
+        uRes = gl.getUniformLocation(copyProgram, 'resolution')
+        gl.uniform2f(uRes, dimensions.width, dimensions.height)
+
+        // get position attribute location in shader
+        copyPosition = gl.getAttribLocation(copyProgram, 'a_pos')
+        // enable the attribute
+        gl.enableVertexAttribArray(copyPosition)
+        // this will point to the vertices in the last bound array buffer.
+        // In this example, we only use one array buffer, where we're storing 
+        // our vertices. Each vertex will have to floats (one for x, one for y)
+        gl.vertexAttribPointer(copyPosition, 2, gl.FLOAT, false, 0, 0)
+    }
+
+    function makeSimulationPhase() {
+        makeSimulationShaders()
+        makeSimulationBuffer()
+        makeSimulationUniforms()
+    }
+
+    function makeSimulationShaders() {
+        let shaderScript = document.getElementById('simulationVertex')
+        let shaderSource = shaderScript.text
+        let vertexShader = gl.createShader(gl.VERTEX_SHADER)
+        gl.shaderSource(vertexShader, shaderSource)
+        gl.compileShader(vertexShader)
+
+        // create fragment shader
+        shaderScript = document.getElementById('simulationFragment')
+        shaderSource = shaderScript.text
+        const simulationFragmentShader = gl.createShader(gl.FRAGMENT_SHADER)
+        gl.shaderSource(simulationFragmentShader, shaderSource)
+        gl.compileShader(simulationFragmentShader)
+        console.log(gl.getShaderInfoLog(simulationFragmentShader))
+
+        // create render program that draws to screen
+        simulationProgram = gl.createProgram()
+        gl.attachShader(simulationProgram, vertexShader)
+        gl.attachShader(simulationProgram, simulationFragmentShader)
+
+        transformFeedback = gl.createTransformFeedback()
+        gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, transformFeedback)
+        gl.transformFeedbackVaryings(simulationProgram, ["o_vpos"], gl.SEPARATE_ATTRIBS)
+
+        gl.linkProgram(simulationProgram)
+        gl.useProgram(simulationProgram)
+
+        
+    }
+
+    function makeSimulationBuffer() {
+        // create a buffer object to store vertices
+        buffer1 = gl.createBuffer()
+        buffer2 = gl.createBuffer()
+
+        // we’re using a vec4
+        const agentSize = 4
+        const buffer = new Float32Array(agentCount * agentSize)
+
+        // set random positions / random headings
+        for (let i = 0; i < agentCount * agentSize; i += agentSize) {
+            buffer[i] = -1 + Math.random() * 2
+            buffer[i + 1] = -1 + Math.random() * 2
+            buffer[i + 2] = Math.random()
+            buffer[i + 3] = Math.random()
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer1)
+
+        gl.bufferData(
+            gl.ARRAY_BUFFER,
+            buffer,
+            gl.DYNAMIC_COPY
+        )
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer2)
+
+        gl.bufferData(gl.ARRAY_BUFFER, agentCount * 16, gl.DYNAMIC_COPY)
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+
+    function makeSimulationUniforms() {
+        uSensorVar = gl.getUniformLocation( simulationProgram, 'sensorVar' )
+        uChemicalDeposit = gl.getUniformLocation( simulationProgram, 'chemicalDeposit' )
+        uPointSize = gl.getUniformLocation( simulationProgram, 'pointSize')
+        uSensorAngle = gl.getUniformLocation( simulationProgram, 'sensorAngle')
+        uRotateAngle = gl.getUniformLocation( simulationProgram, 'rotateAngle')
+        uTime = gl.getUniformLocation( simulationProgram, 'time' )
+        uDirTime = gl.getUniformLocation( simulationProgram, 'dirTime' )
+        uRainbow = gl.getUniformLocation( simulationProgram, 'rainbow' )
+
+        uRes = gl.getUniformLocation(simulationProgram, 'resolution')
+        gl.uniform2f(uRes, gl.drawingBufferWidth, gl.drawingBufferHeight)
+
+        // get position attribute location in shader
+        simulationPosition = gl.getAttribLocation(simulationProgram, 'a_pos')
+        // enable the attribute
+        gl.enableVertexAttribArray(simulationPosition)
+
+        gl.vertexAttribPointer(simulationPosition, 4, gl.FLOAT, false, 0, 0)
+    }
+
+    function makeTextures() {
+        textureBack = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, textureBack)
+
+        // these two lines are needed for non-power-of-2 textures
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+
+        // how to map when texture element is less than one pixel
+        // use gl.NEAREST to avoid linear interpolation
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+        // how to map when texture element is more than one pixel
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+
+        // specify texture format, see https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/texImage2D
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, dimensions.width, dimensions.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+
+        textureFront = gl.createTexture()
+        gl.bindTexture(gl.TEXTURE_2D, textureFront)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, dimensions.width, dimensions.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+
+        // Create a framebuffer and attach the texture.
+        framebuffer = gl.createFramebuffer()
+    }
+
+    let time = 0.
+    function render() {
+        window.requestAnimationFrame(render)
+
+        /* AGENT-BASED SIMULATION */
+        gl.useProgram(simulationProgram)
+
+        gl.uniform1f( uSensorVar, widget.sensorDistance ) 
+        gl.uniform1f( uChemicalDeposit, widget.chemicalDeposit ) 
+        gl.uniform1f( uPointSize, widget.pointSize ) 
+        gl.uniform1f( uSensorAngle, widget.sensorAngle ) 
+        gl.uniform1f( uRotateAngle, widget.rotateAngle ) 
+        time++
+        gl.uniform1f( uTime, time )  
+        if (widget.timeDirection) {
+            gl.uniform1f( uDirTime, 1.0 ) 
+        } else {
+            gl.uniform1f( uDirTime, 0.0 )
+        }  
+        if (widget.rainbow) {
+            gl.uniform1f( uRainbow, 1.0 ) 
+        } else {
+            gl.uniform1f( uRainbow, 0.0 )
+        }  
+        //preset 1
+        if (widget.preset1) {
+            gl.uniform1f( uSensorVar, 6.2) 
+            gl.uniform1f( uChemicalDeposit, 1.0 ) 
+            gl.uniform1f( uPointSize, 1.0 ) 
+            gl.uniform1f( uSensorAngle, 4.89 ) 
+            gl.uniform1f( uRotateAngle, 0.01 ) 
+            gl.uniform1f( uDirTime, 0.0 ) 
+            gl.uniform1f( uRainbow, 1.0 ) 
+        }
+        //preset 2
+        if (widget.preset2) {
+            gl.uniform1f( uSensorVar, 11.5) 
+            gl.uniform1f( uChemicalDeposit, 0.1 ) 
+            gl.uniform1f( uPointSize, 3.6 ) 
+            gl.uniform1f( uSensorAngle, 3.26 ) 
+            gl.uniform1f( uRotateAngle, 3.05 ) 
+            gl.uniform1f( uDirTime, 1.0 ) 
+            gl.uniform1f( uRainbow, 1.0 ) 
+        }
+        //preset 3
+        if (widget.preset3) {
+            gl.uniform1f( uSensorVar, 34.4) 
+            gl.uniform1f( uChemicalDeposit, 0.6 ) 
+            gl.uniform1f( uPointSize, 1.0 ) 
+            gl.uniform1f( uSensorAngle, 5.71 ) 
+            gl.uniform1f( uRotateAngle, 6.28 ) 
+            gl.uniform1f( uDirTime, 0.0 ) 
+            gl.uniform1f( uRainbow, 1.0 ) 
+        }
+        //preset 4
+        if (widget.preset4) {
+            gl.uniform1f( uSensorAngle, 3.14 ) 
+            gl.uniform1f( uRotateAngle, 3.14 ) 
+            gl.uniform1f( uDirTime, 0.0 ) 
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer)
+
+        // use the framebuffer to write to our textureFront texture
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureFront, 0)
+
+        gl.activeTexture(gl.TEXTURE0)
+        // read from textureBack in our shaders
+        gl.bindTexture(gl.TEXTURE_2D, textureBack)
+
+        // bind our array buffer of vants
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer1)
+        gl.vertexAttribPointer(simulationPosition, 4, gl.FLOAT, false, 0, 0)
+        gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, buffer2)
+
+        gl.beginTransformFeedback(gl.POINTS)
+        gl.drawArrays(gl.POINTS, 0, agentCount)
+        gl.endTransformFeedback()
+        /* END Agent-based simulation */
+
+        /* SWAP */
+        let _tmp = textureFront
+        textureFront = textureBack
+        textureBack = _tmp
+
+        /* Decay / Diffuse */
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureFront, 0)
+
+        gl.activeTexture(gl.TEXTURE0)
+        gl.bindTexture(gl.TEXTURE_2D, textureBack)
+
+        gl.useProgram(ddProgram)
+
+        if (widget.gaussianBlur || widget.preset1 || widget.preset3) {
+            gl.uniform1f( uGaussian, 1.0 ) 
+        } else {
+            gl.uniform1f( uGaussian, 0.0 )
+        }
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, quad)
+        gl.vertexAttribPointer(ddPosition, 2, gl.FLOAT, false, 0, 0)
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6)
+        /* END Decay / Diffuse */
+
+        /* COPY TO SCREEN */
+        // use the default framebuffer object by passing null
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight)
+
+        gl.bindTexture(gl.TEXTURE_2D, textureBack)
+
+        // use our drawing (copy) shader
+        gl.useProgram(copyProgram)
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, quad)
+        gl.vertexAttribPointer(copyPosition, 2, gl.FLOAT, false, 0, 0)
+
+        // put simulation on screen
+        gl.drawArrays(gl.TRIANGLES, 0, 6)
+        /* END COPY TO SCREEN */
+
+        // swap vertex buffers 
+        let tmp = buffer1; buffer1 = buffer2; buffer2 = tmp;
+    }
+
+</script>
+
+</html>
