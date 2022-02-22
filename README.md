@@ -8,4 +8,4 @@
 
 [Assignment 3: Reaction Diffusion](https://github.com/jlduerk/CS420X/blob/main/Assignment3/Assignment3.md)
 
-[Assignment 3: Physarum](https://github.com/jlduerk/CS420X/blob/main/Assignment4/Assignment4.md)
+[Assignment 4: Physarum](https://github.com/jlduerk/CS420X/blob/main/Assignment4/Assignment4.md)
